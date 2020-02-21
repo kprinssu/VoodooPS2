@@ -186,7 +186,16 @@ struct elantech_data {
 class EXPORT ApplePS2Elan : public IOHIPointing
 {
     typedef IOHIPointing super;
-    OSDeclareDefaultStructors( ApplePS2Elan );
+    OSDeclareDefaultStructors(ApplePS2Elan);
+    
+    bool init(OSDictionary * properties) override;
+    ApplePS2Elan* probe(IOService* provider, SInt32* score) override;
+    bool start(IOService* provider) override;
+    void stop(IOService* provider) override;
+    
+private:
+    IOService *voodooInputInstance;
+    ApplePS2MouseDevice * _device;
 };
 
 #endif /* VoodooPS2Elan_hpp */

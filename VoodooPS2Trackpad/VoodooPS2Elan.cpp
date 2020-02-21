@@ -6,4 +6,9 @@
 //  Copyright © 2020 Acidanthera. All rights reserved.
 //
 
-#include "VoodooPS2Elan.hpp"
+#include "VoodooPS2Elan.h"
+
+bool ApplePS2Elan::init(OSDictionary * properties) {
+    
+    return true;
+}
