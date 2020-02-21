@@ -194,11 +194,16 @@ class EXPORT ApplePS2Elan : public IOHIPointing
     void stop(IOService* provider) override;
 
 private:
-    IOService *voodooInputInstance;
-    ApplePS2MouseDevice * _device;
+    IOService* voodooInputInstance;
+    ApplePS2MouseDevice* _device;
 
     bool handleOpen(IOService *forClient, IOOptionBits options, void *arg) override;
     void handleClose(IOService *forClient, IOOptionBits options) override;
+
+    bool synapticsSendCmd(unsigned char c, unsigned char *param);
+    bool elantechDetect();
+    bool elantechIsSignatureValid(const unsigned char *param);
+    
 };
 
 #endif /* VoodooPS2Elan_hpp */
