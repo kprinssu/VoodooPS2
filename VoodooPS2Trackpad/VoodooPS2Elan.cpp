@@ -9,10 +9,15 @@
 #include "VoodooPS2Elan.h"
 #include "../VoodooInput/VoodooInput/VoodooInputMultitouch/VoodooInputMessages.h"
 
+OSDefineMetaClassAndStructors(ApplePS2Elan, IOHIPointing);
+
 bool ApplePS2Elan::init(OSDictionary * properties) {
     if (!super::init(properties)) {
         return false;
     }
+
+    _device = NULL;
+    voodooInputInstance = NULL;
 
     return true;
 }
@@ -38,88 +43,83 @@ ApplePS2Elan* ApplePS2Elan::probe(IOService* provider, SInt32* score) {
 bool ApplePS2Elan::synapticsSendCmd(unsigned char c, unsigned char *param) {
      /* Based on EMlyDinEsHMG's port */
     int cmdIndex = 0;
-    PS2Request *request = _device->allocateRequest();
+    TPS2Request<> request;
     //Linux way of Sending Command
 
     //Generic Style checking
-    request->commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
-    request->commands[cmdIndex].inOrOut  = kDP_SetMouseScaling1To1;
+    request.commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[cmdIndex].inOrOut  = kDP_SetMouseScaling1To1;
     cmdIndex++;
 
 
     //Synaptics Style Checking
     for (int i = 6; i >= 0; i -= 2) {
         unsigned char d = (c >> i) & 3;
-        request->commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
-        request->commands[cmdIndex].inOrOut  = kDP_SetMouseResolution;
+        request.commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
+        request.commands[cmdIndex].inOrOut  = kDP_SetMouseResolution;
         cmdIndex++;
 
-        request->commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
-        request->commands[cmdIndex].inOrOut  = d;
+        request.commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
+        request.commands[cmdIndex].inOrOut  = d;
         cmdIndex++;
     }
 
-    request->commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
-    request->commands[cmdIndex++].inOrOut  = kDP_GetMouseInformation;
-    request->commands[cmdIndex].command = kPS2C_ReadDataPort;
-    request->commands[cmdIndex++].inOrOut = 0;
-    request->commands[cmdIndex].command = kPS2C_ReadDataPort;
-    request->commands[cmdIndex++].inOrOut = 0;
-    request->commands[cmdIndex].command = kPS2C_ReadDataPort;
-    request->commands[cmdIndex++].inOrOut = 0;
+    request.commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[cmdIndex++].inOrOut  = kDP_GetMouseInformation;
+    request.commands[cmdIndex].command = kPS2C_ReadDataPort;
+    request.commands[cmdIndex++].inOrOut = 0;
+    request.commands[cmdIndex].command = kPS2C_ReadDataPort;
+    request.commands[cmdIndex++].inOrOut = 0;
+    request.commands[cmdIndex].command = kPS2C_ReadDataPort;
+    request.commands[cmdIndex++].inOrOut = 0;
 
-    request->commandsCount = cmdIndex;
-    _device->submitRequestAndBlock(request);
+    request.commandsCount = cmdIndex;
+    _device->submitRequestAndBlock(&request);
 
     //Reading the Version details from the ports
-    param[0] = request->commands[cmdIndex-3].inOrOut;
-    param[1] = request->commands[cmdIndex-2].inOrOut;
-    param[2] = request->commands[cmdIndex-1].inOrOut;
+    param[0] = request.commands[cmdIndex-3].inOrOut;
+    param[1] = request.commands[cmdIndex-2].inOrOut;
+    param[2] = request.commands[cmdIndex-1].inOrOut;
 
-    _device->freeRequest(request);
-
-    return request->commandsCount != cmdIndex;
+    return request.commandsCount != cmdIndex;
 }
 
 bool ApplePS2Elan::elantechDetect() {
     /* Based on EMlyDinEsHMG's port */
-    PS2Request* request = _device->allocateRequest();
-
+    TPS2Request<8> request;
     /*
      * Use magic knock to detect Elantech touchpad
      */
     // Disable stream mode before the command sequence
-    request->commands[0].command  = kPS2C_SendMouseCommandAndCompareAck;
-    request->commands[0].inOrOut  = kDP_SetDefaultsAndDisable;
+    request.commands[0].command  = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[0].inOrOut  = kDP_SetDefaultsAndDisable;
 
-    request->commands[1].command  = kPS2C_SendMouseCommandAndCompareAck;
-    request->commands[1].inOrOut  = kDP_SetMouseScaling1To1;
-    request->commands[2].command  = kPS2C_SendMouseCommandAndCompareAck;
-    request->commands[2].inOrOut  = kDP_SetMouseScaling1To1;
-    request->commands[3].command  = kPS2C_SendMouseCommandAndCompareAck;
-    request->commands[3].inOrOut  = kDP_SetMouseScaling1To1;
+    request.commands[1].command  = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[1].inOrOut  = kDP_SetMouseScaling1To1;
+    request.commands[2].command  = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[2].inOrOut  = kDP_SetMouseScaling1To1;
+    request.commands[3].command  = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[3].inOrOut  = kDP_SetMouseScaling1To1;
     //Reading Data
-    request->commands[4].command  = kPS2C_SendMouseCommandAndCompareAck;
-    request->commands[4].inOrOut  = kDP_GetMouseInformation;
-    request->commands[5].command = kPS2C_ReadDataPort;
-    request->commands[5].inOrOut = 0;
-    request->commands[6].command = kPS2C_ReadDataPort;
-    request->commands[6].inOrOut = 0;
-    request->commands[7].command = kPS2C_ReadDataPort;
-    request->commands[7].inOrOut = 0;
-    request->commandsCount = 8;
+    request.commands[4].command  = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[4].inOrOut  = kDP_GetMouseInformation;
+    request.commands[5].command = kPS2C_ReadDataPort;
+    request.commands[5].inOrOut = 0;
+    request.commands[6].command = kPS2C_ReadDataPort;
+    request.commands[6].inOrOut = 0;
+    request.commands[7].command = kPS2C_ReadDataPort;
+    request.commands[7].inOrOut = 0;
+    request.commandsCount = 8;
 
-    _device->submitRequestAndBlock(request);
+    _device->submitRequestAndBlock(&request);
 
     //Reading the Version details from the ports
     unsigned char param[3];
-    param[0] = request->commands[5].inOrOut;
-    param[1] = request->commands[6].inOrOut;
-    param[2] = request->commands[7].inOrOut;
+    param[0] = request.commands[5].inOrOut;
+    param[1] = request.commands[6].inOrOut;
+    param[2] = request.commands[7].inOrOut;
 
-    _device->freeRequest(request);
-
-    if (request->commandsCount != 8) {
+    if (request.commandsCount != 8) {
         IOLog("VoodooPS2Elan: sending Elantech magic knock failed.\nn");
         return false;
     }
@@ -151,7 +151,6 @@ bool ApplePS2Elan::elantechDetect() {
         IOLog("VoodooPS2ELAN: Probably not a real Elantech touchpad. Aborting.\n");
         return false;
     }
-
 
     return true;
 }
@@ -195,8 +194,7 @@ bool ApplePS2Elan::start(IOService* provider) {
 
 void ApplePS2Elan::stop(IOService* provider) {
     super::stop(provider);
-};
-
+}
 
 bool ApplePS2Elan::handleOpen(IOService *forClient, IOOptionBits options, void *arg) {
     if (forClient && forClient->getProperty(VOODOO_INPUT_IDENTIFIER)) {
