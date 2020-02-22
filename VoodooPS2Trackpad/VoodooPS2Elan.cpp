@@ -46,6 +46,18 @@ ApplePS2Elan* ApplePS2Elan::probe(IOService* provider, SInt32* score) {
     return this;
 }
 
+bool ApplePS2Elan::start(IOService* provider) {
+    if (!super::start(provider)) {
+        return false;
+    }
+
+    return true;
+}
+
+void ApplePS2Elan::stop(IOService* provider) {
+    super::stop(provider);
+}
+
 bool ApplePS2Elan::sendCmd(unsigned char c, unsigned char *param) {
     if (deviceInfo.use_elan_cmd) {
         return ApplePS2Elan::elantechSendCmd(c, param);
@@ -259,7 +271,7 @@ bool ApplePS2Elan::elantechQueryInfo() {
     IOLog("VoodooPS2Elan: Synaptics capabilities query result 0x%02x, 0x%02x, 0x%02x.\n", deviceInfo.capabilities[0], deviceInfo.capabilities[1], deviceInfo.capabilities[2]);
 
     if (deviceInfo.hw_version != 1) {
-        if (sendCmd(ETP_SAMPLE_QUERY, deviceInfo.samples)) {
+        if (!sendCmd(ETP_SAMPLE_QUERY, deviceInfo.samples)) {
             IOLog("VoodooPS2Elan: failed to query sample data\n");
             return false;
         }
@@ -282,7 +294,7 @@ bool ApplePS2Elan::elantechQueryInfo() {
     deviceInfo.x_res = 31;
     deviceInfo.y_res = 31;
     if (deviceInfo.hw_version == 4) {
-        if (elantechGetResolutionV4()) {
+        if (!elantechGetResolutionV4()) {
             IOLog("VoodooPS2Elan: failed to query resolution data.\n");
         }
     }
@@ -346,7 +358,7 @@ bool ApplePS2Elan::elantechQueryInfo() {
         break;
 
     case 4:
-        if (sendCmd(ETP_FW_ID_QUERY, param))
+        if (!sendCmd(ETP_FW_ID_QUERY, param))
             return false;
 
          deviceInfo.x_max = (0x0f & param[0]) << 8 | param[1];
@@ -461,18 +473,6 @@ unsigned int ApplePS2Elan::elantechConvertRes(unsigned int val)
 
 bool ApplePS2Elan::elantechSetAbsoluteMode() {
     return true;
-}
-
-bool ApplePS2Elan::start(IOService* provider) {
-    if (!super::start(provider)) {
-        return false;
-    }
-
-    return true;
-}
-
-void ApplePS2Elan::stop(IOService* provider) {
-    super::stop(provider);
 }
 
 bool ApplePS2Elan::handleOpen(IOService *forClient, IOOptionBits options, void *arg) {
