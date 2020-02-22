@@ -181,7 +181,6 @@ struct elantech_data {
     unsigned int width;
     struct finger_pos mt[ETP_MAX_FINGERS];
     unsigned char parity[256];
-    struct elantech_device_info info;
 };
 
 class EXPORT ApplePS2Elan : public IOHIPointing
@@ -196,7 +195,8 @@ class EXPORT ApplePS2Elan : public IOHIPointing
 
 private:
     IOService* voodooInputInstance;
-    ApplePS2MouseDevice* _device;
+    ApplePS2MouseDevice* device;
+    struct elantech_data deviceData;
     struct elantech_device_info deviceInfo;
 
     bool handleOpen(IOService *forClient, IOOptionBits options, void *arg) override;
@@ -206,12 +206,21 @@ private:
     bool synapticsSendCmd(unsigned char c, unsigned char *param);
     bool elantechSendCmd(unsigned char c, unsigned char *param);
 
+    bool ps2SlicedCommand(unsigned char c);
+    bool genericPS2Cmd(unsigned char *param,unsigned char c);
+    bool elantechPS2Cmd(unsigned char *param,unsigned char c);
+
+    bool elantechWriteReg(unsigned char reg, unsigned char *val);
+    bool elantechReadReg(unsigned char reg, unsigned char *val);
+
     bool elantechDetect();
     bool elantechIsSignatureValid(const unsigned char *param);
     bool elantechQueryInfo();
     bool elantechSetProperties();
     bool elantechGetResolutionV4();
     static unsigned int elantechConvertRes(unsigned int val);
+
+    bool elantechSetupPS2();
     bool elantechSetAbsoluteMode();
     
 };

@@ -16,8 +16,9 @@ bool ApplePS2Elan::init(OSDictionary * properties) {
         return false;
     }
 
-    _device = NULL;
+    device = NULL;
     voodooInputInstance = NULL;
+    memset(&deviceData, 0, sizeof(elantech_data));
     memset(&deviceInfo, 0, sizeof(elantech_device_info));
 
     return true;
@@ -28,8 +29,8 @@ ApplePS2Elan* ApplePS2Elan::probe(IOService* provider, SInt32* score) {
         return NULL;
     }
 
-    _device = OSDynamicCast(ApplePS2MouseDevice, provider);
-    if (!_device) {
+    device = OSDynamicCast(ApplePS2MouseDevice, provider);
+    if (!device) {
         return NULL;
     }
 
@@ -38,16 +39,16 @@ ApplePS2Elan* ApplePS2Elan::probe(IOService* provider, SInt32* score) {
         return NULL;
     }
 
-    // get the hardware capabilities
-    if (!elantechQueryInfo()) {
-        return NULL;
-    }
-
     return this;
 }
 
 bool ApplePS2Elan::start(IOService* provider) {
     if (!super::start(provider)) {
+        return false;
+    }
+
+    // get the hardware capabilities
+    if (!elantechQueryInfo()) {
         return false;
     }
 
@@ -99,7 +100,7 @@ bool ApplePS2Elan::synapticsSendCmd(unsigned char c, unsigned char *param) {
     request.commands[cmdIndex++].inOrOut = 0;
 
     request.commandsCount = cmdIndex;
-    _device->submitRequestAndBlock(&request);
+    device->submitRequestAndBlock(&request);
 
     //Reading the Version details from the ports
     param[0] = request.commands[cmdIndex-3].inOrOut;
@@ -130,7 +131,7 @@ bool ApplePS2Elan::elantechSendCmd(unsigned char c, unsigned char *param) {
     request.commands[5].command = kPS2C_ReadDataPort;
     request.commands[5].inOrOut = 0;
     request.commandsCount = 6;
-    _device->submitRequestAndBlock(&request);
+    device->submitRequestAndBlock(&request);
 
     //Reading the Version details from the ports
     param[0] = request.commands[3].inOrOut;
@@ -143,6 +144,231 @@ bool ApplePS2Elan::elantechSendCmd(unsigned char c, unsigned char *param) {
     }
 
     return true;
+}
+
+bool ApplePS2Elan::ps2SlicedCommand(unsigned char c) {
+    /* Based on EMlyDinEsHMG's port */
+    int cmdIndex = 0;
+    TPS2Request<> request;
+
+    request.commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[cmdIndex].inOrOut  = kDP_SetMouseScaling1To1;
+    cmdIndex++;
+
+    for (int i = 6; i >= 0; i -= 2) {
+        unsigned char d = (c >> i) & 3;
+        request.commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
+        request.commands[cmdIndex].inOrOut  = kDP_SetMouseResolution;
+        cmdIndex++;
+
+        request.commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
+        request.commands[cmdIndex].inOrOut  = d;
+        cmdIndex++;
+    }
+
+    request.commandsCount = cmdIndex;
+    device->submitRequestAndBlock(&request);
+
+    return request.commandsCount == cmdIndex;
+}
+
+
+bool ApplePS2Elan::genericPS2Cmd(unsigned char *param, unsigned char c) {
+    /* Based on EMlyDinEsHMG's port */
+    TPS2Request<> request;
+
+    request.commands[0].command  = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[0].inOrOut  = c;
+    request.commandsCount = 1;
+
+    if (c == kDP_GetMouseInformation)
+    {
+        request.commands[1].command = kPS2C_ReadDataPort;
+        request.commands[1].inOrOut = 0;
+        request.commands[2].command = kPS2C_ReadDataPort;
+        request.commands[2].inOrOut = 0;
+        request.commands[3].command = kPS2C_ReadDataPort;
+        request.commands[3].inOrOut = 0;
+        request.commandsCount = 4;
+    }
+
+    device->submitRequestAndBlock(&request);
+
+    if (c == kDP_GetMouseInformation)
+    {
+        //Reading the Version details from the ports
+        param[0] = request.commands[1].inOrOut;
+        param[1] = request.commands[2].inOrOut;
+        param[2] = request.commands[3].inOrOut;
+
+        return request.commandsCount == 4;
+    } else {
+        return request.commandsCount == 1;
+    }
+}
+
+bool ApplePS2Elan::elantechPS2Cmd(unsigned char *param, unsigned char c) {
+    /* Based on EMlyDinEsHMG's port */
+    int rc = -1;
+    int tries = ETP_PS2_COMMAND_TRIES;
+
+    TPS2Request<> request;
+    do {
+        request.commands[0].command  = kPS2C_SendMouseCommandAndCompareAck;
+        request.commands[0].inOrOut  = c;
+        request.commandsCount = 1;
+
+        if (c == kDP_GetMouseInformation) {
+            request.commands[1].command = kPS2C_ReadDataPort;
+            request.commands[1].inOrOut = 0;
+            request.commands[2].command = kPS2C_ReadDataPort;
+            request.commands[2].inOrOut = 0;
+            request.commands[3].command = kPS2C_ReadDataPort;
+            request.commands[3].inOrOut = 0;
+            request.commandsCount = 4;
+        }
+
+        device->submitRequestAndBlock(&request);
+
+        if (c == kDP_GetMouseInformation) {
+            param[0] = request.commands[1].inOrOut;
+            param[1] = request.commands[2].inOrOut;
+            param[2] = request.commands[3].inOrOut;
+
+            if(request.commandsCount == 4) {
+                rc = 0;
+            } else {
+                if (request.commandsCount == 1) {
+                    rc = 0;
+                }
+            }
+
+            if (rc == 0) {
+                break;
+            }
+
+            tries--;
+
+            IOSleep(ETP_PS2_COMMAND_DELAY);
+        }
+    } while (tries > 0);
+
+    if (rc != 0) {
+        IOLog("VoodooPS2Elan: ps2 command 0x%02x failed.\n", c);
+    }
+
+    return rc == 0;
+}
+
+bool ApplePS2Elan::elantechWriteReg(unsigned char reg, unsigned char *val) {
+    int rc = 0;
+    if ((reg < 0x07 || reg > 0x26) || (reg > 0x11 && reg < 0x20)) {
+        return false;
+    }
+
+    switch(deviceInfo.hw_version) {
+    case 1:
+        if (ps2SlicedCommand(ETP_REGISTER_WRITE) ||
+            ps2SlicedCommand(reg) ||
+            ps2SlicedCommand(*val) ||
+            genericPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
+            rc = -1;
+        }
+        break;
+
+    case 2:
+        if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, ETP_REGISTER_WRITE) ||
+            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, reg) ||
+            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, *val) ||
+            elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
+            rc = -1;
+        }
+        break;
+
+    case 3:
+        if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
+            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, reg) ||
+            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, *val) ||
+            elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
+            rc = -1;
+        }
+        break;
+
+    case 4:
+        if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
+            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, reg) ||
+            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
+            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, *val) ||
+            elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
+            rc = -1;
+        }
+        break;
+    }
+
+    if (rc) {
+        IOLog("VoodooPS2Elan: Failed to write register 0x%02x with value 0x%02x.\n", reg, *val);
+    }
+
+    return rc == 0;
+}
+
+bool ApplePS2Elan::elantechReadReg(unsigned char reg, unsigned char *val) {
+    unsigned char param[3];
+    int rc = 0;
+
+    if ((reg < 0x07 || reg > 0x26) || (reg > 0x11 && reg < 0x20)) {
+        return false;
+    }
+
+    switch (deviceInfo.hw_version) {
+    case 1:
+        if (ps2SlicedCommand(ETP_REGISTER_READ) ||
+            ps2SlicedCommand(reg) ||
+            genericPS2Cmd(param, kDP_GetMouseInformation)) {
+            rc = -1;
+        }
+        break;
+
+    case 2:
+        if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, ETP_REGISTER_READ) ||
+            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, reg) ||
+            elantechPS2Cmd(param, kDP_GetMouseInformation)) {
+            rc = -1;
+        }
+        break;
+
+    case 3 ... 4:
+        if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
+            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+            elantechPS2Cmd(NULL, reg) ||
+            elantechPS2Cmd(param, kDP_GetMouseInformation)) {
+            rc = -1;
+        }
+        break;
+    }
+
+    if (rc) {
+        IOLog("VoodooPS2Elan: failed to read register 0x%02x.\n", reg);
+    } else if (deviceInfo.hw_version != 4) {
+        *val = param[0];
+    } else {
+        *val = param[1];
+    }
+
+    return rc == 0;
 }
 
 bool ApplePS2Elan::elantechDetect() {
@@ -172,7 +398,7 @@ bool ApplePS2Elan::elantechDetect() {
     request.commands[7].inOrOut = 0;
     request.commandsCount = 8;
 
-    _device->submitRequestAndBlock(&request);
+    device->submitRequestAndBlock(&request);
 
     //Reading the Version details from the ports
     unsigned char param[3];
@@ -471,7 +697,105 @@ unsigned int ApplePS2Elan::elantechConvertRes(unsigned int val)
     return (val * 10 + 790) * 10 / 254;
 }
 
+/*
+* Initialize the touchpad and create sysfs entries
+*/
+bool ApplePS2Elan::elantechSetupPS2() {
+    deviceData.parity[0] = 1;
+    for (int i = 1; i < 256; i++) {
+        deviceData.parity[i] = deviceData.parity[i & (i - 1)] ^ 1;
+    }
+
+    if (!elantechSetAbsoluteMode()) {
+        IOLog("VoodooPS2Elan: failed to put touchpad into absolute mode.\n");
+        return false;
+    }
+
+    return true;
+}
+
+/*
+* Put the touchpad into absolute mode
+*/
 bool ApplePS2Elan::elantechSetAbsoluteMode() {
+    int tries = ETP_READ_BACK_TRIES;
+    int rc = 0;
+
+    switch (deviceInfo.hw_version) {
+        case 1:
+            deviceData.reg_10 = 0x16;
+            deviceData.reg_11 = 0x8f;
+            if (elantech_write_reg(0x10, deviceData.reg_10) ||
+                elantech_write_reg(0x11, deviceData.reg_11)) {
+                rc = -1;
+            }
+            break;
+
+        case 2:
+                        /* Windows driver values */
+            deviceData.reg_10 = 0x54;
+            deviceData.reg_11 = 0x88;    /* 0x8a */
+            deviceData.reg_21 = 0x60;    /* 0x00 */
+            if (elantech_write_reg(0x10, deviceData.reg_10) ||
+                elantech_write_reg(0x11, deviceData.reg_11) ||
+                elantech_write_reg(0x21, deviceData.reg_21)) {
+                rc = -1;
+            }
+            break;
+
+        case 3:
+            if (deviceInfo.set_hw_resolution)
+                deviceData.reg_10 = 0x0b;
+            else
+                deviceData.reg_10 = 0x01;
+
+            if (elantech_write_reg(0x10, deviceData.reg_10))
+                rc = -1;
+
+            break;
+
+        case 4:
+            deviceData.reg_07 = 0x01;
+            if (elantech_write_reg(0x07, deviceData.reg_07))
+                rc = -1;
+
+            /* v4 has no reg 0x10 to read */
+            goto skip_readback_reg_10;
+    }
+
+    if (rc == 0) {
+        /*
+         * Read back reg 0x10. For hardware version 1 we must make
+         * sure the absolute mode bit is set. For hardware version 2
+         * the touchpad is probably initializing and not ready until
+         * we read back the value we just wrote.
+         */
+        do {
+            rc = elantech_read_reg(psmouse, 0x10, &val);
+            if (rc == 0)
+                break;
+            tries--;
+            elantech_debug("retrying read (%d).\n", tries);
+            msleep(ETP_READ_BACK_DELAY);
+        } while (tries > 0);
+
+        if (rc) {
+            psmouse_err(psmouse,
+                    "failed to read back register 0x10.\n");
+        } else if (etd->info.hw_version == 1 &&
+               !(val & ETP_R10_ABSOLUTE_MODE)) {
+            psmouse_err(psmouse,
+                    "touchpad refuses to switch to absolute mode.\n");
+            rc = -1;
+        }
+    }
+
+skip_readback_reg_10:
+    if (rc) {
+        IOLog("VoodooPS2Elan: failed to initialise registers.\n");
+        return false;
+    }
+
     return true;
 }
 
