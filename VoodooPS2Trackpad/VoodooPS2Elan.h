@@ -160,6 +160,7 @@ struct elantech_device_info {
     bool set_hw_resolution;
     bool has_trackpoint;
     bool has_middle_button;
+    bool use_elan_cmd;
 };
 
 struct elantech_data {
@@ -196,13 +197,22 @@ class EXPORT ApplePS2Elan : public IOHIPointing
 private:
     IOService* voodooInputInstance;
     ApplePS2MouseDevice* _device;
+    struct elantech_device_info deviceInfo;
 
     bool handleOpen(IOService *forClient, IOOptionBits options, void *arg) override;
     void handleClose(IOService *forClient, IOOptionBits options) override;
 
+    bool sendCmd(unsigned char c, unsigned char *param);
     bool synapticsSendCmd(unsigned char c, unsigned char *param);
+    bool elantechSendCmd(unsigned char c, unsigned char *param);
+
     bool elantechDetect();
     bool elantechIsSignatureValid(const unsigned char *param);
+    bool elantechQueryInfo();
+    bool elantechSetProperties();
+    bool elantechGetResolutionV4();
+    static unsigned int elantechConvertRes(unsigned int val);
+    bool elantechSetAbsoluteMode();
     
 };
 
