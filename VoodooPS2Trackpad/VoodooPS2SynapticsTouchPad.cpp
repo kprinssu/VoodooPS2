@@ -100,89 +100,9 @@ bool ApplePS2SynapticsTouchPad::init(OSDictionary * dict)
     if (!super::init(dict))
         return false;
 
-    memset(&inputEvent, 0, sizeof(VoodooInputEvent));
-
     // initialize state...
-    _device = NULL;
-    _interruptHandlerInstalled = false;
-    _powerControlHandlerInstalled = false;
-    _packetByteCount = 0;
-    _lastdata = 0;
-    _touchPadModeByte = 0x80; //default: absolute, low-rate, no w-mode
-    _cmdGate = 0;
-    _provider = NULL;
-    
-    // init my stuff
-    memset(&fingerStates, 0, SYNAPTICS_MAX_FINGERS * sizeof(struct synaptics_hw_state));
-    agmFingerCount = 0;
-    lastFingerCount = 0;
-    hadLiftFinger = false;
-    wasSkipped = false;
     for (int i = 0; i < SYNAPTICS_MAX_FINGERS; i++)
         fingerStates[i].virtualFingerIndex = -1;
-    
-    // set defaults for configuration items
-
-    z_finger=45;
-    outzone_wt = palm = palm_wt = false;
-    noled = false;
-    maxaftertyping = 500000000;
-    wakedelay = 1000;
-    skippassthru = false;
-    forcepassthru = false;
-    hwresetonstart = false;
-    _resolution = 2300;
-    _scrollresolution = 2300;
-    _buttonCount = 2;
-    clickpadclicktime = 300000000; // 300ms default
-    clickpadtrackboth = true;
-    
-    xupmm = yupmm = 50; // 50 is just arbitrary, but same
-    minXOverride = maxXOverride = minYOverride = maxYOverride = -1;
-    margin_size_x = margin_size_y = 0;
-    
-    _extendedwmode=false;
-    _extendedwmodeSupported=false;
-    _dynamicEW=false;
-    
-    _processusbmouse = true;
-    _processbluetoothmouse = true;
-    
-    //vars for clickpad and middleButton support (thanks jakibaki)
-    isthinkpad = false;
-    thinkpadButtonState = 0;
-    thinkpadNubScrollXMultiplier = 1;
-    thinkpadNubScrollYMultiplier = 1;
-    thinkpadMiddleScrolled = false;
-    thinkpadMiddleButtonPressed = false;
-    mousemultiplierx = 1;
-    mousemultipliery = 1;
-
-    lastbuttons=0;
-    
-    // state for middle button
-    _buttonTimer = 0;
-    _mbuttonstate = STATE_NOBUTTONS;
-    _pendingbuttons = 0;
-    _buttontime = 0;
-    _maxmiddleclicktime = 100000000;
-    _fakemiddlebutton = true;
-    
-    ignoredeltas=0;
-    ignoredeltasstart=0;
-    keytime = 0;
-    ignoreall = false;
-    passthru = false;
-    ledpresent = false;
-    clickpadtype = 0;
-    _clickbuttons = 0;
-    _reportsv = false;
-    usb_mouse_stops_trackpad = true;
-    _modifierdown = 0;
-    scrollzoommask = 0;
-
-    _forceTouchMode = FORCE_TOUCH_BUTTON;
-    _forceTouchPressureThreshold = 100;
     
     // announce version
 	extern kmod_info_t kmod_info;
@@ -259,6 +179,7 @@ ApplePS2SynapticsTouchPad* ApplePS2SynapticsTouchPad::probe(IOService * provider
         if (disable && disable->isTrue())
         {
             config->release();
+			_device = 0;
             return 0;
         }
         if (OSBoolean* force = OSDynamicCast(OSBoolean, config->getObject("ForceSynapticsDetect")))
@@ -616,28 +537,10 @@ bool ApplePS2SynapticsTouchPad::start( IOService * provider )
     if (!pWorkLoop || !_cmdGate)
     {
         _device->release();
+		_device = nullptr;
         return false;
     }
-
-    attachedHIDPointerDevices = OSSet::withCapacity(1);
-    registerHIDPointerNotifications();
-
-    //
-    // Setup button timer event source
-    //
-    if (_buttonCount >= 3)
-    {
-        _buttonTimer = IOTimerEventSource::timerEventSource(this, OSMemberFunctionCast(IOTimerEventSource::Action, this, &ApplePS2SynapticsTouchPad::onButtonTimer));
-        if (!_buttonTimer)
-        {
-            _device->release();
-            return false;
-        }
-        pWorkLoop->addEventSource(_buttonTimer);
-    }
-    
-    pWorkLoop->addEventSource(_cmdGate);
-    
+	
     //
     // Lock the controller during initialization
     //
@@ -651,6 +554,27 @@ bool ApplePS2SynapticsTouchPad::start( IOService * provider )
     {
         doHardwareReset();
     }
+
+    attachedHIDPointerDevices = OSSet::withCapacity(1);
+    registerHIDPointerNotifications();
+
+    //
+    // Setup button timer event source
+    //
+    if (_buttonCount >= 3)
+    {
+        _buttonTimer = IOTimerEventSource::timerEventSource(this, OSMemberFunctionCast(IOTimerEventSource::Action, this, &ApplePS2SynapticsTouchPad::onButtonTimer));
+        if (!_buttonTimer)
+        {
+			_device->unlock();
+            _device->release();
+			_device = nullptr;
+            return false;
+        }
+        pWorkLoop->addEventSource(_buttonTimer);
+    }
+    
+    pWorkLoop->addEventSource(_cmdGate);
     
     //
     // Query the touchpad for the capabilities we need to know.
@@ -1585,6 +1509,7 @@ void ApplePS2SynapticsTouchPad::sendTouchData() {
 
         transducer.type = FINGER;
         transducer.isValid = true;
+        transducer.supportsPressure = true;
         
         int posX = state.x_avg.average();
         int posY = state.y_avg.average();
@@ -1976,11 +1901,6 @@ bool ApplePS2SynapticsTouchPad::setTouchPadModeByte(UInt8 modeByteValue)
     
     int i;
     TPS2Request<> request;
-    
-#ifdef FULL_HW_RESET
-    // This was an attempt to solve wake from sleep problems.  Not needed.
-    doHardwareReset();
-#endif
 
 #ifdef SET_STREAM_MODE
     // This was another attempt to solve wake from sleep problems.  Not needed.

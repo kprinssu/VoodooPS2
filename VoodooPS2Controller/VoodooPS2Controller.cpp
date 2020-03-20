@@ -38,13 +38,6 @@
 #include "VoodooPS2Controller.h"
 
 
-enum {
-    kPS2PowerStateSleep  = 0,
-    kPS2PowerStateDoze   = 1,
-    kPS2PowerStateNormal = 2,
-    kPS2PowerStateCount
-};
-
 static const IOPMPowerState PS2PowerStateArray[ kPS2PowerStateCount ] =
 {
     { 1,0,0,0,0,0,0,0,0,0,0,0 },
@@ -293,59 +286,14 @@ bool ApplePS2Controller::init(OSDictionary* dict)
   _cmdbyteLock = IOLockAlloc();
   if (!_cmdbyteLock)
       return false;
+	
+  _deliverNotification = OSSymbol::withCString(kDeliverNotifications);
+   if (_deliverNotification == NULL)
+	  return false;
 
-  _workLoop                = 0;
-
-  _interruptSourceKeyboard = 0;
-  _interruptSourceMouse    = 0;
-  _interruptTargetKeyboard = 0;
-  _interruptTargetMouse    = 0;
-  _interruptActionKeyboard = NULL;
-  _interruptActionMouse    = NULL;
-  _packetActionKeyboard    = NULL;
-  _packetActionMouse       = NULL;
-  _interruptInstalledKeyboard = false;
-  _interruptInstalledMouse    = false;
-  _ignoreInterrupts = 0;
-  _ignoreOutOfOrder = 0;
-    
-  _powerControlTargetKeyboard = 0;
-  _powerControlTargetMouse = 0;
-  _powerControlActionKeyboard = 0;
-  _powerControlActionMouse = 0;
-  _powerControlInstalledKeyboard = false;
-  _powerControlInstalledMouse = false;
-    
-  _mouseDevice    = 0;
-  _keyboardDevice = 0;
-  
-  _suppressTimeout = false;
-
-#ifdef NEWIRQ
-  _newIRQLayout = false;	// turbo
-#endif
-    
-  _wakedelay = 10;
-  _mouseWakeFirst = false;
-  _cmdGate = 0;
-    
-  _requestQueueLock = 0;
-
-#if WATCHDOG_TIMER
-  _watchdogTimer = 0;
-#endif
-  _rmcfCache = 0;
-    
   queue_init(&_requestQueue);
 
-  _currentPowerState = kPS2PowerStateNormal;
-  
 #if DEBUGGER_SUPPORT
-  _extendedState = false;
-  _modifierState = 0x00;
-  _debuggingEnabled = false;
-
-  _keyboardQueueAlloc = NULL;
   queue_init(&_keyboardQueue);
   queue_init(&_keyboardQueueUnused);
 
@@ -383,6 +331,7 @@ void ApplePS2Controller::free(void)
         IOLockFree(_cmdbyteLock);
         _cmdbyteLock = 0;
     }
+	
 #if DEBUGGER_SUPPORT
     if (_controllerLock)
     {
@@ -502,38 +451,14 @@ void ApplePS2Controller::resetController(void)
 bool ApplePS2Controller::start(IOService * provider)
 {
   DEBUG_LOG("ApplePS2Controller::start entered...\n");
-    
-  const OSSymbol * deliverNotification = OSSymbol::withCString(kDeliverNotifications);
-  if (deliverNotification == NULL)
-      return false;
 
-  OSDictionary * propertyMatch = propertyMatching(deliverNotification, kOSBooleanTrue);
-  if (propertyMatch != NULL) {
-    IOServiceMatchingNotificationHandler notificationHandler = OSMemberFunctionCast(IOServiceMatchingNotificationHandler, this, &ApplePS2Controller::notificationHandler);
-
-    //
-    // Register notifications for availability of any IOService objects wanting to consume our message events
-    //
-    _publishNotify = addMatchingNotification(gIOFirstPublishNotification,
-                                             propertyMatch,
-                                             notificationHandler,
-                                             this,
-                                             0, 10000);
-
-    _terminateNotify = addMatchingNotification(gIOTerminatedNotification,
-                                               propertyMatch,
-                                               notificationHandler,
-                                               this,
-                                               0, 10000);
-
-    propertyMatch->release();
-  }
-  deliverNotification->release();
  //
  // The driver has been instructed to start.  Allocate all our resources.
  //
  if (!super::start(provider))
      return false;
+	
+ OSDictionary * propertyMatch = nullptr;
 
 #if DEBUGGER_SUPPORT
   // Enable special key sequence to enter debugger if debug boot-arg was set.
@@ -564,7 +489,10 @@ bool ApplePS2Controller::start(IOService * provider)
   // Reset and clean the 8042 keyboard/mouse controller.
   //
     
-  resetController();
+  PE_parse_boot_argn("ps2rst", &_resetControllerFlag, sizeof(_resetControllerFlag));
+  if (_resetControllerFlag & RESET_CONTROLLER_ON_BOOT) {
+    resetController();
+  }
 
   //
   // Use a spin lock to protect the client async request queue.
@@ -676,6 +604,28 @@ bool ApplePS2Controller::start(IOService * provider)
     
   registerService();
 
+  propertyMatch = propertyMatching(_deliverNotification, kOSBooleanTrue);
+  if (propertyMatch != NULL) {
+    IOServiceMatchingNotificationHandler notificationHandler = OSMemberFunctionCast(IOServiceMatchingNotificationHandler, this, &ApplePS2Controller::notificationHandler);
+
+    //
+    // Register notifications for availability of any IOService objects wanting to consume our message events
+    //
+    _publishNotify = addMatchingNotification(gIOFirstPublishNotification,
+										   propertyMatch,
+										   notificationHandler,
+										   this,
+										   0, 10000);
+
+    _terminateNotify = addMatchingNotification(gIOTerminatedNotification,
+											 propertyMatch,
+											 notificationHandler,
+											 this,
+											 0, 10000);
+
+    propertyMatch->release();
+  }
+
   DEBUG_LOG("ApplePS2Controller::start leaving.\n");
   return true; // success
 
@@ -728,6 +678,7 @@ void ApplePS2Controller::stop(IOService * provider)
 
   // Free the RMCF configuration cache
   OSSafeReleaseNULL(_rmcfCache);
+  OSSafeReleaseNULL(_deliverNotification);
 
   // Free the request queue lock and empty out the request queue.
   if (_requestQueueLock)
@@ -1908,7 +1859,10 @@ void ApplePS2Controller::setPowerStateGated( UInt32 powerState )
         // Reset and clean the 8042 keyboard/mouse controller.
         //
         
-        resetController();
+        if (_resetControllerFlag & RESET_CONTROLLER_ON_WAKEUP)
+        {
+          resetController();
+        }
             
 #endif // FULL_INIT_AFTER_WAKE
             
@@ -2036,6 +1990,7 @@ void ApplePS2Controller::notificationHandlerGated(IOService * newService, IONoti
 
 bool ApplePS2Controller::notificationHandler(void * refCon, IOService * newService, IONotifier * notifier)
 {
+	assert(_cmdGate != nullptr);
     _cmdGate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &ApplePS2Controller::notificationHandlerGated), newService, notifier);
     return true;
 }
@@ -2080,6 +2035,7 @@ void ApplePS2Controller::dispatchMessageGated(int* message, void* data)
 
 void ApplePS2Controller::dispatchMessage(int message, void* data)
 {
+	assert(_cmdGate != nullptr);
     _cmdGate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &ApplePS2Controller::dispatchMessageGated), &message, data);
 }
 

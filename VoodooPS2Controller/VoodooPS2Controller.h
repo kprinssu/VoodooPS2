@@ -169,7 +169,18 @@ struct KeyboardQueueElement
 #define kMergedConfiguration    "Merged Configuration"
 #endif
 
+// ps2rst flags
+#define RESET_CONTROLLER_ON_BOOT 1
+#define RESET_CONTROLLER_ON_WAKEUP 2
+
 class IOACPIPlatformDevice;
+
+enum {
+    kPS2PowerStateSleep  = 0,
+    kPS2PowerStateDoze   = 1,
+    kPS2PowerStateNormal = 2,
+    kPS2PowerStateCount
+};
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 // ApplePS2Controller Class Declaration
@@ -181,12 +192,12 @@ class EXPORT ApplePS2Controller : public IOService
   OSDeclareDefaultStructors(ApplePS2Controller);
     
 public:                                // interrupt-time variables and functions
-  IOInterruptEventSource * _interruptSourceKeyboard;
-  IOInterruptEventSource * _interruptSourceMouse;
-  IOInterruptEventSource * _interruptSourceQueue;
+  IOInterruptEventSource * _interruptSourceKeyboard {nullptr};
+  IOInterruptEventSource * _interruptSourceMouse {nullptr};
+  IOInterruptEventSource * _interruptSourceQueue {nullptr};
 
 #if DEBUGGER_SUPPORT
-  bool                     _debuggingEnabled;
+  bool _debuggingEnabled {false};
 
   void lockController(int * state);
   void unlockController(int state);
@@ -197,63 +208,66 @@ public:                                // interrupt-time variables and functions
 #endif //DEBUGGER_SUPPORT
 
 private:
-  IOWorkLoop *             _workLoop;
-  queue_head_t             _requestQueue;
-  IOLock*                  _requestQueueLock;
-  IOLock*                  _cmdbyteLock;
+  IOWorkLoop *             _workLoop {nullptr};
+  queue_head_t             _requestQueue {nullptr};
+  IOLock*                  _requestQueueLock {nullptr};
+  IOLock*                  _cmdbyteLock {nullptr};
 
-  OSObject *               _interruptTargetKeyboard;
-  OSObject *               _interruptTargetMouse;
-  PS2InterruptAction       _interruptActionKeyboard;
-  PS2InterruptAction       _interruptActionMouse;
-  PS2PacketAction          _packetActionKeyboard;
-  PS2PacketAction          _packetActionMouse;
-  bool                     _interruptInstalledKeyboard;
-  bool                     _interruptInstalledMouse;
+  OSObject *               _interruptTargetKeyboard {nullptr};
+  OSObject *               _interruptTargetMouse {nullptr};
+  PS2InterruptAction       _interruptActionKeyboard {nullptr};
+  PS2InterruptAction       _interruptActionMouse {nullptr};
+  PS2PacketAction          _packetActionKeyboard {nullptr};
+  PS2PacketAction          _packetActionMouse {nullptr};
+  bool                     _interruptInstalledKeyboard {false};
+  bool                     _interruptInstalledMouse {false};
 
-  OSObject *               _powerControlTargetKeyboard;
-  OSObject *               _powerControlTargetMouse;
-  PS2PowerControlAction    _powerControlActionKeyboard;
-  PS2PowerControlAction    _powerControlActionMouse;
-  bool                     _powerControlInstalledKeyboard;
-  bool                     _powerControlInstalledMouse;
+  OSObject *               _powerControlTargetKeyboard {nullptr};
+  OSObject *               _powerControlTargetMouse {nullptr};
+  PS2PowerControlAction    _powerControlActionKeyboard {nullptr};
+  PS2PowerControlAction    _powerControlActionMouse {nullptr};
+  bool                     _powerControlInstalledKeyboard {false};
+  bool                     _powerControlInstalledMouse {false};
 
-  int                      _ignoreInterrupts;
-  int                      _ignoreOutOfOrder;
+  int                      _ignoreInterrupts {0};
+  int                      _ignoreOutOfOrder {0};
     
-  ApplePS2MouseDevice *    _mouseDevice;          // mouse nub
-  ApplePS2KeyboardDevice * _keyboardDevice;       // keyboard nub
+  ApplePS2MouseDevice *    _mouseDevice {nullptr};          // mouse nub
+  ApplePS2KeyboardDevice * _keyboardDevice {nullptr};       // keyboard nub
 
-  IONotifier*              _publishNotify;
-  IONotifier*              _terminateNotify;
+  IONotifier*              _publishNotify {nullptr};
+  IONotifier*              _terminateNotify {nullptr};
     
-  OSSet*                   _notificationServices;
+  OSSet*                   _notificationServices {nullptr};
     
 #if DEBUGGER_SUPPORT
-  IOSimpleLock *           _controllerLock;       // mach simple spin lock
+  IOSimpleLock *           _controllerLock {nullptr};       // mach simple spin lock
 
-  KeyboardQueueElement *   _keyboardQueueAlloc;   // queues' allocation space
-  queue_head_t             _keyboardQueue;        // queue of available keys
-  queue_head_t             _keyboardQueueUnused;  // queue of unused entries
+  KeyboardQueueElement *   _keyboardQueueAlloc {nullptr};   // queues' allocation space
+  queue_head_t             _keyboardQueue {nullptr};        // queue of available keys
+  queue_head_t             _keyboardQueueUnused {nullptr};  // queue of unused entries
 
-  bool                     _extendedState;
-  UInt16                   _modifierState;
+  bool                     _extendedState {false};
+  UInt16                   _modifierState {0};
 #endif //DEBUGGER_SUPPORT
 
-  thread_call_t            _powerChangeThreadCall;
-  UInt32                   _currentPowerState;
-  bool                     _hardwareOffline;
-  bool   				   _suppressTimeout;
+  thread_call_t            _powerChangeThreadCall {0};
+  UInt32                   _currentPowerState {kPS2PowerStateNormal};
+  bool                     _hardwareOffline {false};
+  bool   				   _suppressTimeout {false};
 #ifdef NEWIRQ
-  bool   				   _newIRQLayout;
+  bool   				   _newIRQLayout {false};
 #endif
-  int                      _wakedelay;
-  bool                     _mouseWakeFirst;
-  IOCommandGate*           _cmdGate;
+  int                      _wakedelay {10};
+  bool                     _mouseWakeFirst {false};
+  IOCommandGate*           _cmdGate {nullptr};
 #if WATCHDOG_TIMER
-  IOTimerEventSource*      _watchdogTimer;
+  IOTimerEventSource*      _watchdogTimer {nullptr};
 #endif
-  OSDictionary*            _rmcfCache;
+  OSDictionary*            _rmcfCache {nullptr};
+  const OSSymbol*          _deliverNotification {nullptr};
+
+  int                      _resetControllerFlag {RESET_CONTROLLER_ON_BOOT | RESET_CONTROLLER_ON_WAKEUP};
 
   virtual PS2InterruptResult _dispatchDriverInterrupt(PS2DeviceType deviceType, UInt8 data);
   virtual void dispatchDriverInterrupt(PS2DeviceType deviceType, UInt8 data);
