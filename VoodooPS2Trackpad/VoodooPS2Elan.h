@@ -10,6 +10,7 @@
 #define _VOODOOPS2ELAN_HPP
 
 #include "../VoodooPS2Controller/ApplePS2MouseDevice.h"
+#include "../VoodooInput/VoodooInput/VoodooInputMultitouch/VoodooInputEvent.h"
 #include "LegacyIOHIPointing.h"
 
 /*
@@ -129,14 +130,6 @@
         ((((fw_version) & 0x0f2000) == 0x0f2000) && \
          ((fw_version) & 0x0000ff) > 0)
 
-/*
- * The base position for one finger, v4 hardware
- */
-struct finger_pos {
-    unsigned int x;
-    unsigned int y;
-};
-
 struct elantech_device_info {
     unsigned char capabilities[3];
     unsigned char samples[3];
@@ -179,7 +172,6 @@ struct elantech_data {
     unsigned int single_finger_reports;
     unsigned int y_max;
     unsigned int width;
-    struct finger_pos mt[ETP_MAX_FINGERS];
     unsigned char parity[256];
 };
 
@@ -196,6 +188,9 @@ class EXPORT ApplePS2Elan : public IOHIPointing
     bool start(IOService* provider) override;
     void stop(IOService* provider) override;
 
+    bool handleOpen(IOService *forClient, IOOptionBits options, void *arg) override;
+    void handleClose(IOService *forClient, IOOptionBits options) override;
+
 private:
     IOService* voodooInputInstance;
     ApplePS2MouseDevice* device;
@@ -205,8 +200,8 @@ private:
     RingBuffer<UInt8, kPacketLengthMax * 32> ringBuffer;
     int packetByteCount;
 
-    bool handleOpen(IOService *forClient, IOOptionBits options, void *arg) override;
-    void handleClose(IOService *forClient, IOOptionBits options) override;
+    VoodooInputEvent inputEvent {};
+
     virtual PS2InterruptResult interruptOccurred(UInt8 data);
     virtual void packetReady();
 
@@ -216,10 +211,10 @@ private:
 
     bool ps2SlicedCommand(unsigned char c);
     bool genericPS2Cmd(unsigned char *param,unsigned char c);
-    bool elantechPS2Cmd(unsigned char *param,unsigned char c);
+    bool elantechPS2Command(unsigned char *param,unsigned char c);
 
-    bool elantechWriteReg(unsigned char reg, unsigned char *val);
-    bool elantechReadReg(unsigned char reg, unsigned char *val);
+    bool elantechWriteReg(unsigned char reg, unsigned char val);
+    bool elantechReadReg(unsigned char reg, unsigned char* val);
 
     bool elantechDetect();
     bool elantechIsSignatureValid(const unsigned char *param);

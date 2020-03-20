@@ -51,11 +51,13 @@ bool ApplePS2Elan::start(IOService* provider) {
 
     // get the hardware capabilities
     if (!elantechQueryInfo()) {
+        IOLog("VoodooPS2Elan: Failed to query device info\n");
         return false;
     }
 
     // setup the ps2 parameters
     if (!elantechSetupPS2()) {
+        IOLog("VoodooPS2Elan: Failed to set up PS2 mode\n");
         return false;
     }
 
@@ -63,9 +65,7 @@ bool ApplePS2Elan::start(IOService* provider) {
     setSampleRateAndResolution();
     getMouseInformation();
 
-
     device->installInterruptAction(this, OSMemberFunctionCast(PS2InterruptAction ,this, &ApplePS2Elan::interruptOccurred), OSMemberFunctionCast(PS2PacketAction, this, &ApplePS2Elan::packetReady));
-
 
     return true;
 }
@@ -128,7 +128,7 @@ bool ApplePS2Elan::synapticsSendCmd(unsigned char c, unsigned char *param) {
 
 bool ApplePS2Elan::elantechSendCmd(unsigned char c, unsigned char *param) {
     /* Based on EMlyDinEsHMG's port */
-    TPS2Request<> request;
+    TPS2Request<6> request;
     request.commands[0].command  = kPS2C_SendMouseCommandAndCompareAck;
     request.commands[0].inOrOut  = ETP_PS2_CUSTOM_COMMAND;
     request.commands[1].command  = kPS2C_SendMouseCommandAndCompareAck;
@@ -217,18 +217,18 @@ bool ApplePS2Elan::genericPS2Cmd(unsigned char *param, unsigned char c) {
     }
 }
 
-bool ApplePS2Elan::elantechPS2Cmd(unsigned char *param, unsigned char c) {
+bool ApplePS2Elan::elantechPS2Command(unsigned char *param, unsigned char c) {
     /* Based on EMlyDinEsHMG's port */
     int rc = -1;
     int tries = ETP_PS2_COMMAND_TRIES;
 
-    TPS2Request<> request;
     do {
+        TPS2Request<5> request;
         request.commands[0].command  = kPS2C_SendMouseCommandAndCompareAck;
         request.commands[0].inOrOut  = c;
         request.commandsCount = 1;
 
-        if (c == kDP_GetMouseInformation) {
+        if (param != NULL) {
             request.commands[1].command = kPS2C_ReadDataPort;
             request.commands[1].inOrOut = 0;
             request.commands[2].command = kPS2C_ReadDataPort;
@@ -240,27 +240,24 @@ bool ApplePS2Elan::elantechPS2Cmd(unsigned char *param, unsigned char c) {
 
         device->submitRequestAndBlock(&request);
 
-        if (c == kDP_GetMouseInformation) {
+        if (param != NULL) {
             param[0] = request.commands[1].inOrOut;
             param[1] = request.commands[2].inOrOut;
             param[2] = request.commands[3].inOrOut;
 
             if(request.commandsCount == 4) {
                 rc = 0;
-            } else {
-                if (request.commandsCount == 1) {
-                    rc = 0;
-                }
             }
-
-            if (rc == 0) {
-                break;
-            }
-
-            tries--;
-
-            IOSleep(ETP_PS2_COMMAND_DELAY);
+        } else if (request.commandsCount == 1) {
+            rc = 0;
         }
+
+        if (rc == 0) {
+            break;
+        }
+
+        tries--;
+        IOSleep(ETP_PS2_COMMAND_DELAY);
     } while (tries > 0);
 
     if (rc != 0) {
@@ -270,7 +267,7 @@ bool ApplePS2Elan::elantechPS2Cmd(unsigned char *param, unsigned char c) {
     return rc == 0;
 }
 
-bool ApplePS2Elan::elantechWriteReg(unsigned char reg, unsigned char *val) {
+bool ApplePS2Elan::elantechWriteReg(unsigned char reg, unsigned char val) {
     int rc = 0;
     if ((reg < 0x07 || reg > 0x26) || (reg > 0x11 && reg < 0x20)) {
         return false;
@@ -280,59 +277,59 @@ bool ApplePS2Elan::elantechWriteReg(unsigned char reg, unsigned char *val) {
         case 1:
             if (ps2SlicedCommand(ETP_REGISTER_WRITE) ||
                 ps2SlicedCommand(reg) ||
-                ps2SlicedCommand(*val) ||
+                ps2SlicedCommand(val) ||
                 genericPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
                 rc = -1;
             }
             break;
 
         case 2:
-            if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, ETP_REGISTER_WRITE) ||
-                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, reg) ||
-                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, *val) ||
-                elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
+            if (elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, ETP_REGISTER_WRITE) ||
+                elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, reg) ||
+                elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, val) ||
+                elantechPS2Command(NULL, kDP_SetMouseScaling1To1)) {
                 rc = -1;
             }
             break;
 
         case 3:
-            if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
-                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, reg) ||
-                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, *val) ||
-                elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
+            if (elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, ETP_REGISTER_READWRITE) ||
+                elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, reg) ||
+                elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, val) ||
+                elantechPS2Command(NULL, kDP_SetMouseScaling1To1)) {
                 rc = -1;
             }
             break;
 
         case 4:
-            if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
-                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, reg) ||
-                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
-                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, *val) ||
-                elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
+            if (elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, ETP_REGISTER_READWRITE) ||
+                elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, reg) ||
+                elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, ETP_REGISTER_READWRITE) ||
+                elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, val) ||
+                elantechPS2Command(NULL, kDP_SetMouseScaling1To1)) {
                 rc = -1;
             }
             break;
     }
 
     if (rc) {
-        IOLog("VoodooPS2Elan: Failed to write register 0x%02x with value 0x%02x.\n", reg, *val);
+        IOLog("VoodooPS2Elan: Failed to write register 0x%02x with value 0x%02x.\n", reg, val);
     }
 
     return rc == 0;
 }
 
-bool ApplePS2Elan::elantechReadReg(unsigned char reg, unsigned char *val) {
+bool ApplePS2Elan::elantechReadReg(unsigned char reg, unsigned char* val) {
     unsigned char param[3];
     int rc = 0;
 
@@ -350,21 +347,21 @@ bool ApplePS2Elan::elantechReadReg(unsigned char reg, unsigned char *val) {
             break;
 
         case 2:
-            if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, ETP_REGISTER_READ) ||
-                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, reg) ||
-                elantechPS2Cmd(param, kDP_GetMouseInformation)) {
+            if (elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, ETP_REGISTER_READ) ||
+                elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, reg) ||
+                elantechPS2Command(param, kDP_GetMouseInformation)) {
                 rc = -1;
             }
             break;
 
         case 3 ... 4:
-            if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
-                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-                elantechPS2Cmd(NULL, reg) ||
-                elantechPS2Cmd(param, kDP_GetMouseInformation)) {
+            if (elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, ETP_REGISTER_READWRITE) ||
+                elantechPS2Command(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Command(NULL, reg) ||
+                elantechPS2Command(param, kDP_GetMouseInformation)) {
                 rc = -1;
             }
             break;
@@ -397,6 +394,7 @@ bool ApplePS2Elan::elantechDetect() {
     request.commands[2].inOrOut  = kDP_SetMouseScaling1To1;
     request.commands[3].command  = kPS2C_SendMouseCommandAndCompareAck;
     request.commands[3].inOrOut  = kDP_SetMouseScaling1To1;
+
     //Reading Data
     request.commands[4].command  = kPS2C_SendMouseCommandAndCompareAck;
     request.commands[4].inOrOut  = kDP_GetMouseInformation;
@@ -417,7 +415,7 @@ bool ApplePS2Elan::elantechDetect() {
     param[2] = request.commands[7].inOrOut;
 
     if (request.commandsCount != 8) {
-        IOLog("VoodooPS2Elan: sending Elantech magic knock failed.\nn");
+        IOLog("VoodooPS2Elan: sending Elantech magic knock failed (%d).\n", request.commandsCount);
         return false;
     }
 
@@ -748,8 +746,8 @@ bool ApplePS2Elan::elantechSetAbsoluteMode() {
         case 1:
             deviceData.reg_10 = 0x16;
             deviceData.reg_11 = 0x8f;
-            if (elantechWriteReg(0x10, &deviceData.reg_10) ||
-                elantechWriteReg(0x11, &deviceData.reg_11)) {
+            if (elantechWriteReg(0x10, deviceData.reg_10) ||
+                elantechWriteReg(0x11, deviceData.reg_11)) {
                 rc = -1;
             }
             break;
@@ -759,9 +757,9 @@ bool ApplePS2Elan::elantechSetAbsoluteMode() {
             deviceData.reg_10 = 0x54;
             deviceData.reg_11 = 0x88;    /* 0x8a */
             deviceData.reg_21 = 0x60;    /* 0x00 */
-            if (elantechWriteReg(0x10, &deviceData.reg_10) ||
-                elantechWriteReg(0x11, &deviceData.reg_11) ||
-                elantechWriteReg(0x21, &deviceData.reg_21)) {
+            if (elantechWriteReg(0x10, deviceData.reg_10) ||
+                elantechWriteReg(0x11, deviceData.reg_11) ||
+                elantechWriteReg(0x21, deviceData.reg_21)) {
                 rc = -1;
             }
             break;
@@ -772,14 +770,14 @@ bool ApplePS2Elan::elantechSetAbsoluteMode() {
             else
                 deviceData.reg_10 = 0x01;
 
-            if (elantechWriteReg(0x10, &deviceData.reg_10))
+            if (elantechWriteReg(0x10, deviceData.reg_10))
                 rc = -1;
 
             break;
 
         case 4:
             deviceData.reg_07 = 0x01;
-            if (elantechWriteReg(0x07, &deviceData.reg_07))
+            if (elantechWriteReg(0x07, deviceData.reg_07))
                 rc = -1;
 
             /* v4 has no reg 0x10 to read */
@@ -820,7 +818,7 @@ skip_readback_reg_10:
 
 
 void ApplePS2Elan::setSampleRateAndResolution() {
-    TPS2Request<> request;
+    TPS2Request<7> request;
     request.commands[0].command = kPS2C_SendMouseCommandAndCompareAck;
     request.commands[0].inOrOut = kDP_SetDefaultsAndDisable;           // 0xF5, Disable data reporting
     request.commands[1].command = kPS2C_SendMouseCommandAndCompareAck;
@@ -841,7 +839,7 @@ void ApplePS2Elan::setSampleRateAndResolution() {
 }
 
 void ApplePS2Elan::getMouseInformation() {
-    TPS2Request<> request;
+    TPS2Request<4> request;
 
     request.commands[0].command = kPS2C_SendMouseCommandAndCompareAck;
     request.commands[0].inOrOut = kDP_GetMouseInformation;
@@ -937,6 +935,10 @@ void ApplePS2Elan::packetReady()
 
         ringBuffer.advanceTail(kPacketLength);
     }
+
+    if (voodooInputInstance) {
+        super::messageClient(kIOMessageVoodooInputMessage, voodooInputInstance, &inputEvent, sizeof(VoodooInputEvent));
+    }
 }
 
 int ApplePS2Elan::elantechPacketCheckV4() {
@@ -1007,13 +1009,18 @@ void ApplePS2Elan::elantechReportAbsoluteV4(int packetType) {
 void ApplePS2Elan::processPacketStatusV4() {
     unsigned char *packet = ringBuffer.tail();
     unsigned fingers;
-    int i;
+
+    AbsoluteTime timestamp;
+    clock_get_uptime(&timestamp);
+
+    inputEvent.timestamp = timestamp;
 
     /* notify finger state change */
     fingers = packet[1] & 0x1f;
-    for (i = 0; i < ETP_MAX_FINGERS; i++) {
+    for (int i = 0; i < ETP_MAX_FINGERS; i++) {
         if ((fingers & (1 << i)) == 0) {
             // finger has been lifted off the touchpad
+            inputEvent.transducers[i].isTransducerActive = false;
         }
     }
 
@@ -1030,10 +1037,15 @@ void ApplePS2Elan::processPacketHeadV4() {
         return;
     }
 
-    deviceData.mt[id].x = ((packet[1] & 0x0f) << 8) | packet[2];
-    deviceData.mt[id].y = deviceData.y_max - (((packet[4] & 0x0f) << 8) | packet[5]);
+    inputEvent.transducers[id].previousCoordinates = inputEvent.transducers[id].currentCoordinates;
+
+    inputEvent.transducers[id].currentCoordinates.x = ((packet[1] & 0x0f) << 8) | packet[2];
+    inputEvent.transducers[id].currentCoordinates.y = deviceData.y_max - (((packet[4] & 0x0f) << 8) | packet[5]);
     pres = (packet[1] & 0xf0) | ((packet[4] & 0xf0) >> 4);
     traces = (packet[0] & 0xf0) >> 4;
+
+    inputEvent.transducers[id].currentCoordinates.pressure = pres;
+    inputEvent.transducers[id].currentCoordinates.width = traces * deviceData.width;
 
     elantechInputSyncV4();
 }
@@ -1060,12 +1072,15 @@ void ApplePS2Elan::processPacketMotionV4() {
     delta_x2 = (signed char)packet[4];
     delta_y2 = (signed char)packet[5];
 
-    deviceData.mt[id].x += delta_x1 * weight;
-    deviceData.mt[id].y -= delta_y1 * weight;
+    inputEvent.transducers[id].previousCoordinates = inputEvent.transducers[id].currentCoordinates;
+
+    inputEvent.transducers[id].currentCoordinates.x += delta_x1 * weight;
+    inputEvent.transducers[id].currentCoordinates.y -= delta_y1 * weight;
 
     if (sid >= 0) {
-        deviceData.mt[sid].x += delta_x2 * weight;
-        deviceData.mt[sid].y -= delta_y2 * weight;
+        inputEvent.transducers[sid].previousCoordinates = inputEvent.transducers[sid].currentCoordinates;
+        inputEvent.transducers[sid].currentCoordinates.x += delta_x2 * weight;
+        inputEvent.transducers[sid].currentCoordinates.y -= delta_y2 * weight;
     }
 
     elantechInputSyncV4();
