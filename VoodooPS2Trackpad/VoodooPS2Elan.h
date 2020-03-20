@@ -183,6 +183,9 @@ struct elantech_data {
     unsigned char parity[256];
 };
 
+#define kPacketLength 6
+#define kPacketLengthMax 6
+
 class EXPORT ApplePS2Elan : public IOHIPointing
 {
     typedef IOHIPointing super;
@@ -199,8 +202,13 @@ private:
     struct elantech_data deviceData;
     struct elantech_device_info deviceInfo;
 
+    RingBuffer<UInt8, kPacketLengthMax * 32> ringBuffer;
+    int packetByteCount;
+
     bool handleOpen(IOService *forClient, IOOptionBits options, void *arg) override;
     void handleClose(IOService *forClient, IOOptionBits options) override;
+    virtual PS2InterruptResult interruptOccurred(UInt8 data);
+    virtual void packetReady();
 
     bool sendCmd(unsigned char c, unsigned char *param);
     bool synapticsSendCmd(unsigned char c, unsigned char *param);
@@ -222,7 +230,14 @@ private:
 
     bool elantechSetupPS2();
     bool elantechSetAbsoluteMode();
-    
+    bool elantechSetInputParams();
+
+    void setSampleRateAndResolution();
+    void getMouseInformation();
+
+    int elantechPacketCheckV4();
+    void elantechReportAbsoluteV4(int packetType);
+
 };
 
 #endif /* VoodooPS2Elan_hpp */

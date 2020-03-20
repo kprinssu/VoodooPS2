@@ -7,6 +7,7 @@
 //
 
 #include "VoodooPS2Elan.h"
+#define kIOFBTransformKey               "IOFBTransform"
 #include "../VoodooInput/VoodooInput/VoodooInputMultitouch/VoodooInputMessages.h"
 
 OSDefineMetaClassAndStructors(ApplePS2Elan, IOHIPointing);
@@ -20,6 +21,7 @@ bool ApplePS2Elan::init(OSDictionary * properties) {
     voodooInputInstance = NULL;
     memset(&deviceData, 0, sizeof(elantech_data));
     memset(&deviceInfo, 0, sizeof(elantech_device_info));
+    packetByteCount = 0;
 
     return true;
 }
@@ -52,6 +54,19 @@ bool ApplePS2Elan::start(IOService* provider) {
         return false;
     }
 
+    // setup the ps2 parameters
+    if (!elantechSetupPS2()) {
+        return false;
+    }
+
+    // Ported from Emlydinesh
+    setSampleRateAndResolution();
+    getMouseInformation();
+
+
+    device->installInterruptAction(this, OSMemberFunctionCast(PS2InterruptAction ,this, &ApplePS2Elan::interruptOccurred), OSMemberFunctionCast(PS2PacketAction, this, &ApplePS2Elan::packetReady));
+
+
     return true;
 }
 
@@ -68,17 +83,14 @@ bool ApplePS2Elan::sendCmd(unsigned char c, unsigned char *param) {
 }
 
 bool ApplePS2Elan::synapticsSendCmd(unsigned char c, unsigned char *param) {
-     /* Based on EMlyDinEsHMG's port */
+    /* Based on EMlyDinEsHMG's port */
     int cmdIndex = 0;
     TPS2Request<> request;
-    //Linux way of Sending Command
 
-    //Generic Style checking
     request.commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
     request.commands[cmdIndex].inOrOut  = kDP_SetMouseScaling1To1;
     cmdIndex++;
 
-    //Synaptics Style Checking
     for (int i = 6; i >= 0; i -= 2) {
         unsigned char d = (c >> i) & 3;
         request.commands[cmdIndex].command  = kPS2C_SendMouseCommandAndCompareAck;
@@ -102,7 +114,6 @@ bool ApplePS2Elan::synapticsSendCmd(unsigned char c, unsigned char *param) {
     request.commandsCount = cmdIndex;
     device->submitRequestAndBlock(&request);
 
-    //Reading the Version details from the ports
     param[0] = request.commands[cmdIndex-3].inOrOut;
     param[1] = request.commands[cmdIndex-2].inOrOut;
     param[2] = request.commands[cmdIndex-1].inOrOut;
@@ -171,7 +182,6 @@ bool ApplePS2Elan::ps2SlicedCommand(unsigned char c) {
 
     return request.commandsCount == cmdIndex;
 }
-
 
 bool ApplePS2Elan::genericPS2Cmd(unsigned char *param, unsigned char c) {
     /* Based on EMlyDinEsHMG's port */
@@ -266,53 +276,53 @@ bool ApplePS2Elan::elantechWriteReg(unsigned char reg, unsigned char *val) {
         return false;
     }
 
-    switch(deviceInfo.hw_version) {
-    case 1:
-        if (ps2SlicedCommand(ETP_REGISTER_WRITE) ||
-            ps2SlicedCommand(reg) ||
-            ps2SlicedCommand(*val) ||
-            genericPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
-            rc = -1;
-        }
-        break;
+    switch (deviceInfo.hw_version) {
+        case 1:
+            if (ps2SlicedCommand(ETP_REGISTER_WRITE) ||
+                ps2SlicedCommand(reg) ||
+                ps2SlicedCommand(*val) ||
+                genericPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
+                rc = -1;
+            }
+            break;
 
-    case 2:
-        if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, ETP_REGISTER_WRITE) ||
-            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, reg) ||
-            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, *val) ||
-            elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
-            rc = -1;
-        }
-        break;
+        case 2:
+            if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, ETP_REGISTER_WRITE) ||
+                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, reg) ||
+                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, *val) ||
+                elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
+                rc = -1;
+            }
+            break;
 
-    case 3:
-        if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
-            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, reg) ||
-            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, *val) ||
-            elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
-            rc = -1;
-        }
-        break;
+        case 3:
+            if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
+                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, reg) ||
+                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, *val) ||
+                elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
+                rc = -1;
+            }
+            break;
 
-    case 4:
-        if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
-            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, reg) ||
-            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
-            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, *val) ||
-            elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
-            rc = -1;
-        }
-        break;
+        case 4:
+            if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
+                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, reg) ||
+                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
+                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, *val) ||
+                elantechPS2Cmd(NULL, kDP_SetMouseScaling1To1)) {
+                rc = -1;
+            }
+            break;
     }
 
     if (rc) {
@@ -331,33 +341,33 @@ bool ApplePS2Elan::elantechReadReg(unsigned char reg, unsigned char *val) {
     }
 
     switch (deviceInfo.hw_version) {
-    case 1:
-        if (ps2SlicedCommand(ETP_REGISTER_READ) ||
-            ps2SlicedCommand(reg) ||
-            genericPS2Cmd(param, kDP_GetMouseInformation)) {
-            rc = -1;
-        }
-        break;
+        case 1:
+            if (ps2SlicedCommand(ETP_REGISTER_READ) ||
+                ps2SlicedCommand(reg) ||
+                genericPS2Cmd(param, kDP_GetMouseInformation)) {
+                rc = -1;
+            }
+            break;
 
-    case 2:
-        if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, ETP_REGISTER_READ) ||
-            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, reg) ||
-            elantechPS2Cmd(param, kDP_GetMouseInformation)) {
-            rc = -1;
-        }
-        break;
+        case 2:
+            if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, ETP_REGISTER_READ) ||
+                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, reg) ||
+                elantechPS2Cmd(param, kDP_GetMouseInformation)) {
+                rc = -1;
+            }
+            break;
 
-    case 3 ... 4:
-        if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
-            elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
-            elantechPS2Cmd(NULL, reg) ||
-            elantechPS2Cmd(param, kDP_GetMouseInformation)) {
-            rc = -1;
-        }
-        break;
+        case 3 ... 4:
+            if (elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, ETP_REGISTER_READWRITE) ||
+                elantechPS2Cmd(NULL, ETP_PS2_CUSTOM_COMMAND) ||
+                elantechPS2Cmd(NULL, reg) ||
+                elantechPS2Cmd(param, kDP_GetMouseInformation)) {
+                rc = -1;
+            }
+            break;
     }
 
     if (rc) {
@@ -527,83 +537,83 @@ bool ApplePS2Elan::elantechQueryInfo() {
 
     /* query range information */
     switch (deviceInfo.hw_version) {
-    case 1:
-        deviceInfo.x_min = ETP_XMIN_V1;
-        deviceInfo.y_min = ETP_YMIN_V1;
-        deviceInfo.x_max = ETP_XMAX_V1;
-        deviceInfo.y_max = ETP_YMAX_V1;
-        break;
+        case 1:
+            deviceInfo.x_min = ETP_XMIN_V1;
+            deviceInfo.y_min = ETP_YMIN_V1;
+            deviceInfo.x_max = ETP_XMAX_V1;
+            deviceInfo.y_max = ETP_YMAX_V1;
+            break;
 
-    case 2:
-        if (deviceInfo.fw_version == 0x020800 ||
-             deviceInfo.fw_version == 0x020b00 ||
-             deviceInfo.fw_version == 0x020030) {
-             deviceInfo.x_min = ETP_XMIN_V2;
-             deviceInfo.y_min = ETP_YMIN_V2;
-             deviceInfo.x_max = ETP_XMAX_V2;
-             deviceInfo.y_max = ETP_YMAX_V2;
-        } else {
-            int i;
-            int fixed_dpi;
+        case 2:
+            if (deviceInfo.fw_version == 0x020800 ||
+                 deviceInfo.fw_version == 0x020b00 ||
+                 deviceInfo.fw_version == 0x020030) {
+                 deviceInfo.x_min = ETP_XMIN_V2;
+                 deviceInfo.y_min = ETP_YMIN_V2;
+                 deviceInfo.x_max = ETP_XMAX_V2;
+                 deviceInfo.y_max = ETP_YMAX_V2;
+            } else {
+                int i;
+                int fixed_dpi;
 
-            i = ( deviceInfo.fw_version > 0x020800 &&
-                  deviceInfo.fw_version < 0x020900) ? 1 : 2;
+                i = ( deviceInfo.fw_version > 0x020800 &&
+                      deviceInfo.fw_version < 0x020900) ? 1 : 2;
 
-            if (!sendCmd(ETP_FW_ID_QUERY, param)) {
-                return false;
-            }
-
-            fixed_dpi = param[1] & 0x10;
-
-            if ((( deviceInfo.fw_version >> 16) == 0x14) && fixed_dpi) {
-                if (!sendCmd(ETP_SAMPLE_QUERY, param)) {
+                if (!sendCmd(ETP_FW_ID_QUERY, param)) {
                     return false;
                 }
 
-                 deviceInfo.x_max = ( deviceInfo.capabilities[1] - i) * param[1] / 2;
-                 deviceInfo.y_max = ( deviceInfo.capabilities[2] - i) * param[2] / 2;
-            } else if ( deviceInfo.fw_version == 0x040216) {
-                 deviceInfo.x_max = 819;
-                 deviceInfo.y_max = 405;
-            } else if ( deviceInfo.fw_version == 0x040219 ||  deviceInfo.fw_version == 0x040215) {
-                 deviceInfo.x_max = 900;
-                 deviceInfo.y_max = 500;
-            } else {
-                 deviceInfo.x_max = ( deviceInfo.capabilities[1] - i) * 64;
-                 deviceInfo.y_max = ( deviceInfo.capabilities[2] - i) * 64;
+                fixed_dpi = param[1] & 0x10;
+
+                if ((( deviceInfo.fw_version >> 16) == 0x14) && fixed_dpi) {
+                    if (!sendCmd(ETP_SAMPLE_QUERY, param)) {
+                        return false;
+                    }
+
+                     deviceInfo.x_max = ( deviceInfo.capabilities[1] - i) * param[1] / 2;
+                     deviceInfo.y_max = ( deviceInfo.capabilities[2] - i) * param[2] / 2;
+                } else if ( deviceInfo.fw_version == 0x040216) {
+                     deviceInfo.x_max = 819;
+                     deviceInfo.y_max = 405;
+                } else if ( deviceInfo.fw_version == 0x040219 ||  deviceInfo.fw_version == 0x040215) {
+                     deviceInfo.x_max = 900;
+                     deviceInfo.y_max = 500;
+                } else {
+                     deviceInfo.x_max = ( deviceInfo.capabilities[1] - i) * 64;
+                     deviceInfo.y_max = ( deviceInfo.capabilities[2] - i) * 64;
+                }
             }
-        }
-        break;
+            break;
 
-    case 3:
-        if (!sendCmd(ETP_FW_ID_QUERY, param))
-            return false;
+        case 3:
+            if (!sendCmd(ETP_FW_ID_QUERY, param))
+                return false;
 
-        deviceInfo.x_max = (0x0f & param[0]) << 8 | param[1];
-        deviceInfo.y_max = (0xf0 & param[0]) << 4 | param[2];
-        break;
+            deviceInfo.x_max = (0x0f & param[0]) << 8 | param[1];
+            deviceInfo.y_max = (0xf0 & param[0]) << 4 | param[2];
+            break;
 
-    case 4:
-        if (!sendCmd(ETP_FW_ID_QUERY, param))
-            return false;
+        case 4:
+            if (!sendCmd(ETP_FW_ID_QUERY, param))
+                return false;
 
-         deviceInfo.x_max = (0x0f & param[0]) << 8 | param[1];
-         deviceInfo.y_max = (0xf0 & param[0]) << 4 | param[2];
-        traces =  deviceInfo.capabilities[1];
-        if ((traces < 2) || (traces >  deviceInfo.x_max))
-            return false;
+             deviceInfo.x_max = (0x0f & param[0]) << 8 | param[1];
+             deviceInfo.y_max = (0xf0 & param[0]) << 4 | param[2];
+            traces =  deviceInfo.capabilities[1];
+            if ((traces < 2) || (traces >  deviceInfo.x_max))
+                return false;
 
-         deviceInfo.width =  deviceInfo.x_max / (traces - 1);
+             deviceInfo.width =  deviceInfo.x_max / (traces - 1);
 
-        /* column number of traces */
-         deviceInfo.x_traces = traces;
+            /* column number of traces */
+             deviceInfo.x_traces = traces;
 
-        /* row number of traces */
-        traces =  deviceInfo.capabilities[2];
-        if ((traces >= 2) && (traces <=  deviceInfo.y_max))
-             deviceInfo.y_traces = traces;
+            /* row number of traces */
+            traces =  deviceInfo.capabilities[2];
+            if ((traces >= 2) && (traces <=  deviceInfo.y_max))
+                 deviceInfo.y_traces = traces;
 
-        break;
+            break;
     }
 
     /* check for the middle button: DMI matching or new v4 firmwares */
@@ -626,18 +636,18 @@ bool ApplePS2Elan::elantechSetProperties() {
         deviceInfo.hw_version = 1;
     } else {
         switch (ver) {
-        case 2:
-        case 4:
-            deviceInfo.hw_version = 2;
-            break;
-        case 5:
-            deviceInfo.hw_version = 3;
-            break;
-        case 6 ... 15:
-            deviceInfo.hw_version = 4;
-            break;
-        default:
-            return false;
+            case 2:
+            case 4:
+                deviceInfo.hw_version = 2;
+                break;
+            case 5:
+                deviceInfo.hw_version = 3;
+                break;
+            case 6 ... 15:
+                deviceInfo.hw_version = 4;
+                break;
+            default:
+                return false;
         }
     }
 
@@ -711,6 +721,10 @@ bool ApplePS2Elan::elantechSetupPS2() {
         return false;
     }
 
+    if (!elantechSetInputParams()) {
+         IOLog("VoodooPS2Elan: failed to query touchpad range.\n");
+    }
+
     return true;
 }
 
@@ -718,27 +732,36 @@ bool ApplePS2Elan::elantechSetupPS2() {
 * Put the touchpad into absolute mode
 */
 bool ApplePS2Elan::elantechSetAbsoluteMode() {
+    unsigned char val = 0;
     int tries = ETP_READ_BACK_TRIES;
     int rc = 0;
+
+    /* Based on EMlyDinEsHMG's port */
+    // Reset the trackpad
+    TPS2Request<> request;
+    request.commands[0].command = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[0].inOrOut = kDP_Reset;                          // 0xFF
+    request.commandsCount = 1;
+    device->submitRequestAndBlock(&request);
 
     switch (deviceInfo.hw_version) {
         case 1:
             deviceData.reg_10 = 0x16;
             deviceData.reg_11 = 0x8f;
-            if (elantech_write_reg(0x10, deviceData.reg_10) ||
-                elantech_write_reg(0x11, deviceData.reg_11)) {
+            if (elantechWriteReg(0x10, &deviceData.reg_10) ||
+                elantechWriteReg(0x11, &deviceData.reg_11)) {
                 rc = -1;
             }
             break;
 
         case 2:
-                        /* Windows driver values */
+            /* Windows driver values */
             deviceData.reg_10 = 0x54;
             deviceData.reg_11 = 0x88;    /* 0x8a */
             deviceData.reg_21 = 0x60;    /* 0x00 */
-            if (elantech_write_reg(0x10, deviceData.reg_10) ||
-                elantech_write_reg(0x11, deviceData.reg_11) ||
-                elantech_write_reg(0x21, deviceData.reg_21)) {
+            if (elantechWriteReg(0x10, &deviceData.reg_10) ||
+                elantechWriteReg(0x11, &deviceData.reg_11) ||
+                elantechWriteReg(0x21, &deviceData.reg_21)) {
                 rc = -1;
             }
             break;
@@ -749,14 +772,14 @@ bool ApplePS2Elan::elantechSetAbsoluteMode() {
             else
                 deviceData.reg_10 = 0x01;
 
-            if (elantech_write_reg(0x10, deviceData.reg_10))
+            if (elantechWriteReg(0x10, &deviceData.reg_10))
                 rc = -1;
 
             break;
 
         case 4:
             deviceData.reg_07 = 0x01;
-            if (elantech_write_reg(0x07, deviceData.reg_07))
+            if (elantechWriteReg(0x07, &deviceData.reg_07))
                 rc = -1;
 
             /* v4 has no reg 0x10 to read */
@@ -771,21 +794,17 @@ bool ApplePS2Elan::elantechSetAbsoluteMode() {
          * we read back the value we just wrote.
          */
         do {
-            rc = elantech_read_reg(psmouse, 0x10, &val);
+            rc = elantechReadReg(0x10, &val);
             if (rc == 0)
                 break;
             tries--;
-            elantech_debug("retrying read (%d).\n", tries);
-            msleep(ETP_READ_BACK_DELAY);
+            IOSleep(ETP_READ_BACK_DELAY);
         } while (tries > 0);
 
         if (rc) {
-            psmouse_err(psmouse,
-                    "failed to read back register 0x10.\n");
-        } else if (etd->info.hw_version == 1 &&
-               !(val & ETP_R10_ABSOLUTE_MODE)) {
-            psmouse_err(psmouse,
-                    "touchpad refuses to switch to absolute mode.\n");
+            IOLog("VoodooPS2Elan: failed to read back register 0x10.\n");
+        } else if (deviceInfo.hw_version == 1 && !(val & ETP_R10_ABSOLUTE_MODE)) {
+            IOLog("VoodooPS2Elan: touchpad refuses to switch to absolute mode.\n");
             rc = -1;
         }
     }
@@ -795,6 +814,61 @@ skip_readback_reg_10:
         IOLog("VoodooPS2Elan: failed to initialise registers.\n");
         return false;
     }
+
+    return rc == 0;
+}
+
+
+void ApplePS2Elan::setSampleRateAndResolution() {
+    TPS2Request<> request;
+    request.commands[0].command = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[0].inOrOut = kDP_SetDefaultsAndDisable;           // 0xF5, Disable data reporting
+    request.commands[1].command = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[1].inOrOut = kDP_SetMouseSampleRate;              // 0xF3
+    request.commands[2].command = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[2].inOrOut = 0x64;                                // 100 dpi
+    request.commands[3].command = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[3].inOrOut = kDP_SetMouseResolution;              // 0xE8
+    request.commands[4].command = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[4].inOrOut = 0x03;                                // 0x03 = 8 counts/mm
+    request.commands[5].command = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[5].inOrOut = kDP_SetMouseScaling1To1;             // 0xE6
+    request.commands[6].command = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[6].inOrOut = kDP_Enable;                          // 0xF4, Enable Data Reporting
+    request.commandsCount = 7;
+
+    device->submitRequestAndBlock(&request);
+}
+
+void ApplePS2Elan::getMouseInformation() {
+    TPS2Request<> request;
+
+    request.commands[0].command = kPS2C_SendMouseCommandAndCompareAck;
+    request.commands[0].inOrOut = kDP_GetMouseInformation;
+    request.commands[1].command = kPS2C_ReadDataPort;
+    request.commands[1].inOrOut = 0;
+    request.commands[2].command = kPS2C_ReadDataPort;
+    request.commands[2].inOrOut = 0;
+    request.commands[3].command = kPS2C_ReadDataPort;
+    request.commands[3].inOrOut = 0;
+    request.commandsCount = 4;
+    
+    device->submitRequestAndBlock(&request);
+}
+
+/*
+* Set the appropriate event bits for the input subsystem
+*/
+bool ApplePS2Elan::elantechSetInputParams() {
+    // Set up the VoodooInput interface
+    setProperty(VOODOO_INPUT_LOGICAL_MAX_X_KEY, deviceInfo.x_max - deviceInfo.x_min, 32);
+    setProperty(VOODOO_INPUT_LOGICAL_MAX_Y_KEY, deviceInfo.y_max - deviceInfo.y_min, 32);
+
+    setProperty(VOODOO_INPUT_PHYSICAL_MAX_X_KEY, (deviceInfo.x_max + 1) / deviceInfo.x_res, 32);
+    setProperty(VOODOO_INPUT_PHYSICAL_MAX_Y_KEY, (deviceInfo.y_max + 1) / deviceInfo.y_res, 32);
+
+    setProperty(kIOFBTransformKey, 0ull, 32);
+    setProperty("VoodooInputSupported", kOSBooleanTrue);
 
     return true;
 }
@@ -813,4 +887,102 @@ bool ApplePS2Elan::handleOpen(IOService *forClient, IOOptionBits options, void *
 void ApplePS2Elan::handleClose(IOService *forClient, IOOptionBits options) {
     OSSafeReleaseNULL(voodooInputInstance);
     super::handleClose(forClient, options);
+}
+
+
+PS2InterruptResult ApplePS2Elan::interruptOccurred(UInt8 data) {
+    UInt8* packet = ringBuffer.head();
+    packet[packetByteCount++] = data;
+
+    if (packetByteCount == kPacketLengthMax)
+    {
+        ringBuffer.advanceHead(kPacketLengthMax);
+        packetByteCount = 0;
+        return kPS2IR_packetReady;
+    }
+
+    return kPS2IR_packetBuffering;
+}
+
+/*
+* Process byte stream from mouse and handle complete packets
+*/
+void ApplePS2Elan::packetReady()
+{
+    // empty the ring buffer, dispatching each packet...
+    while (ringBuffer.count() >= kPacketLength)
+    {
+        int packetType;
+        switch (deviceInfo.hw_version) {
+            case 1:
+            case 2:
+                // V1 and V2 are ancient hardware, not going to implement right away
+                break;
+            case 3:
+                break;
+            case 4:
+                packetType = elantechPacketCheckV4();
+
+                switch (packetType) {
+                    case PACKET_UNKNOWN:
+                        break;
+
+                    case PACKET_TRACKPOINT:
+                        break;
+                    default:
+                        elantechReportAbsoluteV4(packetType);
+                }
+                break;
+        }
+
+        ringBuffer.advanceTail(kPacketLength);
+    }
+}
+
+int ApplePS2Elan::elantechPacketCheckV4() {
+    unsigned char *packet = ringBuffer.tail();
+    unsigned char packetType = packet[3] & 0x03;
+    unsigned int icVersion;
+    bool sanityCheck;
+
+    if (deviceData.tp_dev && (packet[3] & 0x0f) == 0x06) {
+        return PACKET_TRACKPOINT;
+    }
+
+    /* This represents the version of IC body. */
+    icVersion = (deviceInfo.fw_version & 0x0f0000) >> 16;
+
+    /*
+    * Sanity check based on the constant bits of a packet.
+    * The constant bits change depending on the value of
+    * the hardware flag 'crc_enabled' and the version of
+    * the IC body, but are the same for every packet,
+    * regardless of the type.
+    */
+    if (deviceInfo.crc_enabled) {
+        sanityCheck = ((packet[3] & 0x08) == 0x00);
+    } else if (icVersion == 7 && deviceInfo.samples[1] == 0x2A) {
+        sanityCheck = ((packet[3] & 0x1c) == 0x10);
+    } else {
+        sanityCheck = ((packet[0] & 0x08) == 0x00 && (packet[3] & 0x1c) == 0x10);
+    }
+
+    if (!sanityCheck) {
+        return PACKET_UNKNOWN;
+    }
+
+    switch (packetType) {
+        case 0:
+            return PACKET_V4_STATUS;
+        case 1:
+            return PACKET_V4_HEAD;
+        case 2:
+            return PACKET_V4_MOTION;
+    }
+
+    return PACKET_UNKNOWN;
+}
+
+void ApplePS2Elan::elantechReportAbsoluteV4(int packetType) {
+
 }
