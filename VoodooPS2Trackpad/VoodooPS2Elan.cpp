@@ -984,5 +984,93 @@ int ApplePS2Elan::elantechPacketCheckV4() {
 }
 
 void ApplePS2Elan::elantechReportAbsoluteV4(int packetType) {
+    switch (packetType) {
+        case PACKET_V4_STATUS:
+            processPacketStatusV4();
+            break;
 
+        case PACKET_V4_HEAD:
+            processPacketHeadV4();
+            break;
+
+        case PACKET_V4_MOTION:
+            processPacketMotionV4();
+            break;
+        case PACKET_UNKNOWN:
+        default:
+            /* impossible to get here */
+            break;
+    }
+}
+
+
+void ApplePS2Elan::processPacketStatusV4() {
+    unsigned char *packet = ringBuffer.tail();
+    unsigned fingers;
+    int i;
+
+    /* notify finger state change */
+    fingers = packet[1] & 0x1f;
+    for (i = 0; i < ETP_MAX_FINGERS; i++) {
+        if ((fingers & (1 << i)) == 0) {
+            // finger has been lifted off the touchpad
+        }
+    }
+
+    elantechInputSyncV4();
+}
+
+
+void ApplePS2Elan::processPacketHeadV4() {
+    unsigned char *packet = ringBuffer.tail();
+    int id = ((packet[3] & 0xe0) >> 5) - 1;
+    int pres, traces;
+
+    if (id < 0) {
+        return;
+    }
+
+    deviceData.mt[id].x = ((packet[1] & 0x0f) << 8) | packet[2];
+    deviceData.mt[id].y = deviceData.y_max - (((packet[4] & 0x0f) << 8) | packet[5]);
+    pres = (packet[1] & 0xf0) | ((packet[4] & 0xf0) >> 4);
+    traces = (packet[0] & 0xf0) >> 4;
+
+    elantechInputSyncV4();
+}
+
+void ApplePS2Elan::processPacketMotionV4() {
+    unsigned char *packet = ringBuffer.tail();
+    int weight, delta_x1 = 0, delta_y1 = 0, delta_x2 = 0, delta_y2 = 0;
+    int id, sid;
+
+    id = ((packet[0] & 0xe0) >> 5) - 1;
+    if (id < 0) {
+        return;
+    }
+
+    sid = ((packet[3] & 0xe0) >> 5) - 1;
+    weight = (packet[0] & 0x10) ? ETP_WEIGHT_VALUE : 1;
+    /*
+     * Motion packets give us the delta of x, y values of specific fingers,
+     * but in two's complement. Let the compiler do the conversion for us.
+     * Also _enlarge_ the numbers to int, in case of overflow.
+     */
+    delta_x1 = (signed char)packet[1];
+    delta_y1 = (signed char)packet[2];
+    delta_x2 = (signed char)packet[4];
+    delta_y2 = (signed char)packet[5];
+
+    deviceData.mt[id].x += delta_x1 * weight;
+    deviceData.mt[id].y -= delta_y1 * weight;
+
+    if (sid >= 0) {
+        deviceData.mt[sid].x += delta_x2 * weight;
+        deviceData.mt[sid].y -= delta_y2 * weight;
+    }
+
+    elantechInputSyncV4();
+}
+
+void ApplePS2Elan::elantechInputSyncV4() {
+    // handle physical buttons here
 }

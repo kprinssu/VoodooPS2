@@ -238,6 +238,10 @@ private:
     int elantechPacketCheckV4();
     void elantechReportAbsoluteV4(int packetType);
 
+    void processPacketStatusV4();
+    void processPacketHeadV4();
+    void processPacketMotionV4();
+    void elantechInputSyncV4();
 };
 
 #endif /* VoodooPS2Elan_hpp */
