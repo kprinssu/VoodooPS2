@@ -210,7 +210,7 @@ private:
     bool elantechSendCmd(unsigned char c, unsigned char *param);
 
     bool ps2SlicedCommand(unsigned char c);
-    bool genericPS2Cmd(unsigned char *param,unsigned char c);
+    bool genericPS2Command(unsigned char *param,unsigned char c);
     bool elantechPS2Command(unsigned char *param,unsigned char c);
 
     bool elantechWriteReg(unsigned char reg, unsigned char val);
